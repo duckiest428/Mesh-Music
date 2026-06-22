@@ -852,7 +852,10 @@ ul{ list-style:none; }
   background: var(--bg);
 }
 
+/* FIX: Absolute inset overrides standard browser layout height processing blocks inside flex containers */
 .mock-screenshot {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
