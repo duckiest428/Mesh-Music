@@ -16,7 +16,9 @@
   const mobileMenu = document.getElementById("navMobile");
 
   const onScroll = () => {
-    nav.classList.toggle("is-scrolled", window.scrollY > 12);
+    if (nav) {
+      nav.classList.toggle("is-scrolled", window.scrollY > 12);
+    }
   };
   onScroll();
   window.addEventListener("scroll", onScroll, { passive: true });
