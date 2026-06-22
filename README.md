@@ -1,4 +1,4 @@
-Mesh Player
+Mesh Player Note: This project is mainly Vibe-Coded, thus it's free. If you would like, you can support me at buymeacoffee.com/petey1 as this has taken a lot of time to put together. Thank you!
 
 
 Mesh Player is a FREE (yes you heard me) high-performance local audio client designed around the native Apple Music aesthetic but supercharged for local file management, spatial audio parsing, and advanced metadata visualization.
@@ -19,5 +19,3 @@ Advanced Sorting: View your songs sorted chronologically by Date Added.
 Versatile UI States: Switch fluidly between the default catalog explorer, a compact background miniplayer, and an immersive Fullscreen Player mode.
 
 Adaptive Theme Engine: Features fluid UI themes, including a dynamic, hardware-accelerated ambient mesh gradient that matches the color profile of the active track's artwork.
-
-Note: This project is mainly Vibe-Coded, thus it's free. If you would like, 
