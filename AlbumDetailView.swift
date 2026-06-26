@@ -14,6 +14,10 @@ struct AlbumDetailView: View {
     
     var albumName: String
     
+    @State private var showNewPlaylistAlert = false
+    @State private var newPlaylistName = ""
+    @State private var trackToAdd: LocalTrack?
+    
     // Find all tracks in this album
     var albumTracks: [LocalTrack] {
         state.tracks.filter { $0.album == albumName }
@@ -67,7 +71,7 @@ struct AlbumDetailView: View {
     var copyrightText: String {
         let year = "2026"
         let artist = representative?.artist ?? "Music Corp"
-        return "℗ \(year) \(artist) Records LLC, licensed under native CoreAudio pipeline."
+        return "℗ \(year) \(artist) Records LLC"
     }
     
 
@@ -102,6 +106,10 @@ struct AlbumDetailView: View {
                                     .font(.system(size: 60))
                                     .foregroundColor(state.theme.accent)
                             }
+                            
+                            AnimatedArtworkView(track: rep, cornerRadius: 12)
+                                .frame(width: 190, height: 190)
+                                .allowsHitTesting(false)
                         }
                     }
                     .frame(width: 190, height: 190)
@@ -182,6 +190,7 @@ struct AlbumDetailView: View {
                     HStack(spacing: 12) {
                         Button(action: {
                             if !albumTracks.isEmpty {
+                                state.setQueue(tracks: albumTracks, startTrack: albumTracks.first!)
                                 engine.playTrack(albumTracks.first!)
                             }
                         }) {
@@ -200,6 +209,7 @@ struct AlbumDetailView: View {
                         Button(action: {
                             if !albumTracks.isEmpty {
                                 let shuffled = albumTracks.shuffled()
+                                state.setQueue(tracks: albumTracks, startTrack: shuffled.first!)
                                 engine.playTrack(shuffled.first!)
                             }
                         }) {
@@ -292,20 +302,50 @@ struct AlbumDetailView: View {
                                     .foregroundColor(state.theme.textSecondary)
                                 
                                 // Double-dot / Three-dot options menu
-                                Button(action: {
-                                    // Set track selection to trigger standard non-fullscreen menu options
-                                    state.selectedTrackId = track.id
-                                }) {
+                                Menu {
+                                    Button("Play") {
+                                        state.setQueue(tracks: albumTracks, startTrack: track)
+                                        engine.playTrack(track)
+                                    }
+                                    
+                                    Divider()
+                                    
+                                    Menu("Add to Playlist") {
+                                        Button("New Playlist...") {
+                                            trackToAdd = track
+                                            newPlaylistName = ""
+                                            showNewPlaylistAlert = true
+                                        }
+                                        
+                                        Divider()
+                                        
+                                        ForEach(state.playlists) { playlist in
+                                            Button(playlist.name) {
+                                                state.addTrackToPlaylist(track: track, playlistId: playlist.id)
+                                            }
+                                        }
+                                    }
+                                    
+                                    Divider()
+                                    
+                                    Button("Show in Finder") {
+                                        if let url = track.fileURL {
+                                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                                        }
+                                    }
+                                } label: {
                                     Image(systemName: "ellipsis")
                                         .foregroundColor(state.theme.textSecondary)
                                 }
-                                .buttonStyle(PremiumButtonStyle())
+                                .menuStyle(.borderlessButton)
+                                .frame(width: 24)
                             }
                             .padding(.vertical, 8)
                             .padding(.horizontal, 8)
                             .background(isPlaying ? state.theme.accent.opacity(0.06) : Color.clear)
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) {
+                                state.setQueue(tracks: albumTracks, startTrack: track)
                                 engine.playTrack(track)
                             }
                             
@@ -323,6 +363,17 @@ struct AlbumDetailView: View {
             }
             .padding(24)
         }
+        .alert("New Playlist", isPresented: $showNewPlaylistAlert, actions: {
+            TextField("Playlist Name", text: $newPlaylistName)
+            Button("Create", action: {
+                if !newPlaylistName.isEmpty {
+                    state.createNewPlaylist(name: newPlaylistName, initialTrack: trackToAdd)
+                }
+            })
+            Button("Cancel", role: .cancel, action: {})
+        }, message: {
+            Text("Enter a name for the new playlist.")
+        })
     }
     
     // Formatting durations helper
