@@ -8,6 +8,7 @@
 
 import SwiftUI
 import AVFoundation
+import CoreAudio
 
 struct SidebarView: View {
     @ObservedObject var state: AppStateManager
@@ -465,9 +466,10 @@ struct LyricsSidebarView: View {
     }
     
     private func isLineActive(_ line: SyncedLyricLine) -> Bool {
-        guard let index = engine.parsedLyrics.firstIndex(of: line) else { return false }
-        let nextTime = index + 1 < engine.parsedLyrics.count ? engine.parsedLyrics[index + 1].timestamp : Double.infinity
-        return engine.currentTime >= line.timestamp && engine.currentTime < nextTime
+        if line.isBreak {
+            return engine.currentTime >= line.breakStart && engine.currentTime <= line.breakEnd
+        }
+        return engine.currentTime >= line.timestamp && engine.currentTime < line.endTime
     }
 }
 
@@ -476,6 +478,7 @@ struct LyricsSidebarView: View {
 struct QueueSidebarView: View {
     @ObservedObject var state: AppStateManager
     @ObservedObject var engine: AudioEngineManager
+    var isFullscreen: Bool = false
     
     var upcomingTracks: [LocalTrack] {
         guard let currentTrack = engine.currentTrack else { return [] }
@@ -507,12 +510,23 @@ struct QueueSidebarView: View {
                 
                 if !upcomingTracks.isEmpty {
                     Button(action: {
-                        state.tracks.shuffle()
+                        if let currentTrack = engine.currentTrack, let idx = state.tracks.firstIndex(where: { $0.id == currentTrack.id }) {
+                            var newTracks = state.tracks
+                            let current = newTracks.remove(at: idx)
+                            newTracks.shuffle()
+                            newTracks.insert(current, at: 0)
+                            state.tracks = newTracks
+                        } else {
+                            state.tracks.shuffle()
+                        }
+                        #if os(macOS)
+                        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+                        #endif
                     }) {
                         HStack(spacing: 3) {
                             Image(systemName: "shuffle")
                                 .font(.system(size: 10))
-                            Text("Shuffle Clear")
+                            Text("Shuffle Remaining")
                                 .font(.system(size: 9, weight: .bold))
                         }
                         .foregroundColor(state.theme.textSecondary)
@@ -605,35 +619,13 @@ struct QueueSidebarView: View {
                         }
                         .frame(maxWidth: .infinity)
                     } else {
-                        VStack(spacing: 2) {
-                            ForEach(upcomingTracks.prefix(45)) { track in
+                        LazyVStack(spacing: 2) {
+                            ForEach(upcomingTracks.prefix(100)) { track in
                                 Button(action: {
                                     engine.playTrack(track)
                                 }) {
                                     HStack(spacing: 10) {
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 4)
-                                                .fill(state.theme.cardBackground)
-                                                .frame(width: 32, height: 32)
-                                            
-                                            if let artData = track.embeddedArtData, let nsImage = NSImage(data: artData) {
-                                                Image(nsImage: nsImage)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 32, height: 32)
-                                                    .cornerRadius(4)
-                                            } else if let imageURL = track.localCoverURL, let nsImage = NSImage(contentsOf: imageURL) {
-                                                Image(nsImage: nsImage)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 32, height: 32)
-                                                    .cornerRadius(4)
-                                            } else {
-                                                Image(systemName: track.coverImageName)
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(state.theme.accent)
-                                            }
-                                        }
+                                        AsyncThumbnailView(track: track, size: 32, theme: state.theme)
                                         
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(track.title)
@@ -659,8 +651,8 @@ struct QueueSidebarView: View {
                                 .buttonStyle(QueueRowButtonStyle(theme: state.theme))
                             }
                             
-                            if upcomingTracks.count > 45 {
-                                Text("+ \(upcomingTracks.count - 45) MORE TRACKS IN QUEUE")
+                            if upcomingTracks.count > 100 {
+                                Text("+ \(upcomingTracks.count - 100) MORE TRACKS IN QUEUE")
                                     .font(.system(size: 8, weight: .semibold, design: .monospaced))
                                     .foregroundColor(state.theme.textSecondary.opacity(0.4))
                                     .padding(.vertical, 6)
@@ -671,8 +663,9 @@ struct QueueSidebarView: View {
                 }
             }
         }
-        .frame(width: 280)
-        .background(state.theme.sidebarBackground)
+        .frame(width: isFullscreen ? 440 : 280)
+        .background(isFullscreen ? Color.clear : state.theme.sidebarBackground)
+        .background(isFullscreen ? AnyView(Rectangle().fill(Material.ultraThin).opacity(0.85)) : AnyView(Color.clear))
     }
 }
 
@@ -698,19 +691,14 @@ struct SwiftOutputDevice: Identifiable, Hashable {
 
 struct OutputDeviceSidebarView: View {
     @ObservedObject var state: AppStateManager
+    @ObservedObject var engine: AudioEngineManager
+    var isFullscreen: Bool = false
     
-    @State private var activeDeviceId: String = "peteys-macbook"
     @State private var connectingDeviceId: String? = nil
     @State private var volumes: [String: Double] = [
         "peteys-macbook": 0.75,
         "peteys-airpods-2": 0.60,
         "peteys-airpods-3": 0.55
-    ]
-    
-    let devices = [
-        SwiftOutputDevice(id: "peteys-macbook", name: "Petey's MacBook Air", type: "built-in", hasAtmos: true, model: "Internal Stereo Speakers"),
-        SwiftOutputDevice(id: "peteys-airpods-2", name: "Petey's Airpods Pro 2 #2", type: "headphones", hasAtmos: true, model: "Personalized Spatial Audio"),
-        SwiftOutputDevice(id: "peteys-airpods-3", name: "Petey's AirPods Pro 3 2", type: "headphones", hasAtmos: true, model: "Personalized Spatial Audio")
     ]
     
     var body: some View {
@@ -753,8 +741,8 @@ struct OutputDeviceSidebarView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
                     
-                    ForEach(devices) { device in
-                        let isActive = device.id == activeDeviceId
+                    ForEach(engine.availableOutputs) { device in
+                        let isActive = device.id == engine.activeOutputId
                         let isConnecting = device.id == connectingDeviceId
                         let volumeBinding = Binding<Double>(
                             get: { volumes[device.id] ?? 0.5 },
@@ -763,10 +751,10 @@ struct OutputDeviceSidebarView: View {
                         
                         VStack(spacing: 0) {
                             Button(action: {
-                                if device.id != activeDeviceId && connectingDeviceId == nil {
+                                if device.id != engine.activeOutputId && connectingDeviceId == nil {
                                     connectingDeviceId = device.id
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                                        activeDeviceId = device.id
+                                        engine.setOutputDevice(id: device.id)
                                         connectingDeviceId = nil
                                     }
                                 }
@@ -791,13 +779,7 @@ struct OutputDeviceSidebarView: View {
                                                 .lineLimit(1)
                                             
                                             if device.hasAtmos {
-                                                Text("Atmos")
-                                                    .font(.system(size: 7, weight: .black))
-                                                    .padding(.horizontal, 3)
-                                                    .padding(.vertical, 1)
-                                                    .background(Color.blue.opacity(0.15))
-                                                    .foregroundColor(.blue)
-                                                    .cornerRadius(3)
+                                                DolbyAtmosBadge(color: .blue, scale: 0.6, showText: false)
                                             }
                                         }
                                         
@@ -934,8 +916,9 @@ struct OutputDeviceSidebarView: View {
                 .foregroundColor(state.theme.textSecondary.opacity(0.4))
                 .padding(.vertical, 8)
         }
-        .frame(width: 280)
-        .background(state.theme.sidebarBackground)
+        .frame(width: isFullscreen ? 440 : 280)
+        .background(isFullscreen ? Color.clear : state.theme.sidebarBackground)
+        .background(isFullscreen ? AnyView(Rectangle().fill(Material.ultraThin).opacity(0.85)) : AnyView(Color.clear))
     }
     
     private func getIconName(type: String) -> String {
@@ -948,6 +931,63 @@ struct OutputDeviceSidebarView: View {
             return "tv.and.mediabox"
         default: // bluetooth / wireless
             return "speaker.wave.2"
+        }
+    }
+}
+
+struct AsyncThumbnailView: View {
+    let track: LocalTrack
+    let size: CGFloat
+    let theme: ThemeColor
+    
+    @State private var thumbnail: NSImage?
+    
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.cardBackground)
+                .frame(width: size, height: size)
+            
+            if let thumbnail = thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .cornerRadius(4)
+            } else {
+                Image(systemName: track.coverImageName)
+                    .font(.system(size: size * 0.4))
+                    .foregroundColor(theme.accent)
+            }
+        }
+        .onAppear {
+            generateThumbnail()
+        }
+    }
+    
+    private func generateThumbnail() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var sourceImage: NSImage?
+            if let artData = track.embeddedArtData {
+                sourceImage = NSImage(data: artData)
+            } else if let imageURL = track.localCoverURL {
+                sourceImage = NSImage(contentsOf: imageURL)
+            }
+            
+            if let img = sourceImage {
+                let targetSize = NSSize(width: size * 2, height: size * 2)
+                let newImage = NSImage(size: targetSize)
+                newImage.lockFocus()
+                img.draw(in: NSRect(origin: .zero, size: targetSize),
+                         from: NSRect(origin: .zero, size: img.size),
+                         operation: .copy,
+                         fraction: 1.0)
+                newImage.unlockFocus()
+                
+                DispatchQueue.main.async {
+                    self.thumbnail = newImage
+                }
+            }
         }
     }
 }
